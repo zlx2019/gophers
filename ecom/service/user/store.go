@@ -39,6 +39,7 @@ func (s *Store) GetUserByID(id int) (*types.User, error) {
 	return nil, nil
 }
 func (s *Store) CreateUser(*types.User) error {
+	// res, err := s.Exec("insert into user(first_name,) values ()")
 	return nil
 
 }
