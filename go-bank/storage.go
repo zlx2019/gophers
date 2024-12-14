@@ -23,7 +23,8 @@ type PostgresStore struct {
 
 // 创建 Postgresql 客户端实例
 func NewPostgresStore(user, password, dbName string) (*PostgresStore, error) {
-	dsn := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable", user, password, dbName)
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		"192.168.1.223", 5432, user, password, dbName)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
@@ -55,12 +56,22 @@ func (s *PostgresStore) UpdateAccount(account *Account) error {
 
 // 删除账户
 func (s *PostgresStore) DeleteAccount(id int) error {
-	return nil
+	_, err := s.db.Query("delete from account where id = $1", id)
+	return err
 }
 
 // 根据ID获取账户信息
 func (s *PostgresStore) GetAccountByID(id int) (*Account, error) {
-	return nil, nil
+	rows, err := s.db.Query("select * from account where id = $1", id)
+	if err != nil {
+		return nil, err
+	}
+	if rows.Next() {
+		if account, err := scanIntoAccount(rows); err == nil {
+			return account, nil
+		}
+	}
+	return nil, fmt.Errorf("account %d not found", id)
 }
 
 // 获取所有账户信息
@@ -78,6 +89,16 @@ func (s *PostgresStore) GetAccounts() ([]*Account, error) {
 		accounts = append(accounts, account)
 	}
 	return accounts, nil
+}
+
+// 将从数据库读取到的一行记录，映射为 Account 对象
+func scanIntoAccount(rows *sql.Rows) (*Account, error) {
+	account := new(Account)
+	err := rows.Scan(&account.ID, &account.FirstName, &account.LastName, &account.Number, &account.Balance, &account.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return account, nil
 }
 
 // 创建数据表

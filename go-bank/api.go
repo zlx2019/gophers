@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -27,13 +28,10 @@ func NewAPIServer(listenAddr string, store *PostgresStore) *APIServer {
 type iHandleFunc func(http.ResponseWriter, *http.Request) error
 
 // WriteJson Response Json
-func WriteJson(w http.ResponseWriter, httpStatus int, value any) error {
+func WriteJSON(w http.ResponseWriter, httpStatus int, value any) error {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 	return json.NewEncoder(w).Encode(value)
-}
-func StatusOk(w http.ResponseWriter, value any) error {
-	return WriteJson(w, http.StatusOK, value)
 }
 
 // WriteText Response Text
@@ -44,8 +42,8 @@ func WriteText(w http.ResponseWriter, httpStatus int, value string) error {
 	return err
 }
 
-type ApiError struct {
-	message string
+func ResponseSuccess(w http.ResponseWriter, value any) error {
+	return WriteJSON(w, http.StatusOK, Success(value))
 }
 
 // 执行 iHandlerFunc，进行错误处理，以及返回包装后的 HandlerFunc
@@ -54,7 +52,7 @@ func wrapHTTPHandleFunc(f iHandleFunc) http.HandlerFunc {
 		if err := f(w, r); err != nil {
 			// handle the error
 			log.Println(err)
-			_ = WriteJson(w, http.StatusInternalServerError, ApiError{message: err.Error()})
+			_ = WriteJSON(w, http.StatusInternalServerError, Failed[any](err.Error()))
 		}
 	}
 }
@@ -66,7 +64,7 @@ func (s *APIServer) Startup() {
 	// 注册路由
 	router.HandleFunc("/", wrapHTTPHandleFunc(s.ping))
 	router.HandleFunc("/account", wrapHTTPHandleFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", wrapHTTPHandleFunc(s.GetAccountByID))
+	router.HandleFunc("/account/{id}", wrapHTTPHandleFunc(s.handleAccountByID))
 	log.Println("Server running on port: ", s.listenAddr)
 	// 启动服务
 	if err := http.ListenAndServe(s.listenAddr, router); err != nil {
@@ -92,13 +90,27 @@ func (s *APIServer) ping(w http.ResponseWriter, r *http.Request) error {
 	return WriteText(w, http.StatusOK, "API Server on running...")
 }
 
-// 根据ID 获取账户信息
-func (s *APIServer) GetAccountByID(w http.ResponseWriter, r *http.Request) error {
-	// 读取 /account/{id} 参数
-	id := mux.Vars(r)["id"]
-
-	fmt.Println(id)
-	return nil
+// 根据ID 处理账户信息
+func (s *APIServer) handleAccountByID(w http.ResponseWriter, r *http.Request) error {
+	// 获取 /{id} 参数
+	id, err := parseIDFromPath(r)
+	if err != nil {
+		return err
+	}
+	switch strings.ToUpper(r.Method) {
+	case "GET":
+		account, err := s.store.GetAccountByID(id)
+		if err != nil {
+			return err
+		}
+		return ResponseSuccess(w, account)
+	case "DELETE":
+		if err = s.store.DeleteAccount(id); err != nil {
+			return err
+		}
+		return ResponseSuccess(w, nil)
+	}
+	return fmt.Errorf("method not support %s", r.Method)
 }
 
 // 获取所有账户信息
@@ -107,7 +119,7 @@ func (s *APIServer) GetAccounts(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return StatusOk(w, accounts)
+	return ResponseSuccess(w, accounts)
 }
 
 // 创建账户
@@ -123,15 +135,32 @@ func (s *APIServer) CreateAccount(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	account.ID = id
-	return StatusOk(w, account)
+	return ResponseSuccess(w, account)
 }
 
 // 删除账户
 func (s *APIServer) DeleteAccount(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	id, err := parseIDFromPath(r)
+	if err != nil {
+		return err
+	}
+	if err = s.store.DeleteAccount(id); err != nil {
+		return err
+	}
+	return ResponseSuccess(w, nil)
 }
 
 // 账户转账
 func (s *APIServer) TransferAccount(w http.ResponseWriter, r *http.Request) error {
 	return nil
+}
+
+// 解析 Request 中的 {id} 参数
+func parseIDFromPath(req *http.Request) (int, error) {
+	val := mux.Vars(req)["id"]
+	id, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, fmt.Errorf("invalid id: [%s]", val)
+	}
+	return id, err
 }
